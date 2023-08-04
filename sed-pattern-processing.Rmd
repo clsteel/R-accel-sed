@@ -1,0 +1,330 @@
+---
+title: "VIDA Accelerometry Sedentary Processing"
+output: html_notebook
+---
+
+Accelerometry processing for sedentary behavior pattern variables based on Paul Hibbing's R package: https://github.com/paulhibbing/PBpatterns 
+
+Out-of-box use for ActiGraph monitors, will later explore usage with PAL event files (or PAL event files expanded to epoch level) and CHAP output
+```{r}
+library(tidyverse)
+library(readr)
+library(dplyr)
+```
+
+
+Importing test file and formatting datetime 
+also converting weartime variable to boolean (this was previously calculated outside of this package by applying Choi to the data.)
+
+```{r}
+epoch_file <- read_csv("Epoch_Preprocessed/Vida_PA_EPOCH.csv", id = "participant_id", show_col_types=FALSE)
+```
+
+```{r}
+epoch_file$Date <- as.Date(epoch_file$TimeStamp,format="%m/%d/%Y")
+epoch_file$TimeStamp <- strptime(epoch_file$TimeStamp, format="%m/%d/%Y %H:%M")
+epoch_file$is_wear <- epoch_file$AG_nonwear == 'w'
+```
+
+following the Vignette to create a 'valid day' variable to only include days with >10h weartime
+```{r}
+epoch_file$valid_index <- sapply(
+  epoch_file$Date,
+  function(i, vec) vec[match(i, names(vec))],
+  vec=tapply(epoch_file$is_wear, epoch_file$Date, sum)) >= 600
+```
+
+Creating a categorical variable to describe activity classifications based on counts 
+```{r}
+epoch_file$intensity <- cut(
+  epoch_file$AG_axis1, 
+  breaks=c(-Inf, 100, Inf),
+  labels=c("SB","non-sed"),
+  right=FALSE
+)
+```
+removing some weird null rows--there are only ~8 of these rows and they look like ActiCal data that didn't overlap with the other devices. 
+```{r}
+epoch_file <- epoch_file[!is.na(epoch_file$TimeStamp),]
+```
+
+using the Analyze Bouts function to create the sed bout level dataset and then the SB_summary dataset
+
+```{r}
+sed_bouts <- PBpatterns::analyze_bouts(
+  x=epoch_file$intensity, 
+  target='SB', 'rle_standard', epoch_length_sec=60, is_wear=epoch_file$is_wear, valid_indices=epoch_file$valid_index
+)
+
+```
+
+modifying one of the functions inside paul's R package to include median bout duration and also adding a category of time spent in bouts longer than 60 minutes. last two lines in this block are 'hooking' the function so that when it's called internally it uses this one rather than the base one.
+```{r}
+sb_range_bouts_cs <- function(d, bouts) {
+
+  data.frame(
+    d,
+    mean_SB_bout_min = mean(bouts$lengths_min),
+    median_SB_bout_min = median(bouts$lengths_min),
+    sb_0_14_hr = sum(ifelse(
+      bouts$lengths_min < 15, bouts$lengths_min, 0
+    )) / 60,
+    sb_15_29_hr = sum(ifelse(
+      bouts$lengths_min >= 15 & bouts$lengths_min < 30, bouts$lengths_min, 0
+    )) / 60,
+    sb_30_60_hr = sum(ifelse(
+      bouts$lengths_min >= 30 & bouts$lengths_min < 60, bouts$lengths_min, 0
+    )) / 60,
+    sb_60_Inf_hr = sum(ifelse(
+      bouts$lengths_min >=60, bouts$lengths_min, 0
+    )) / 60
+  ) %T>%
+  {stopifnot(isTRUE(all.equal(
+    sum(rev(.)[ ,1:4]), sum(bouts$lengths_min) / 60,
+    scale = 1, tolerance = 1/60/10
+  )))}
+
+}
+environment(sb_range_bouts_cs) <- asNamespace('PBpatterns')
+assignInNamespace("sb_range_bouts", sb_range_bouts_cs, ns='PBpatterns')
+```
+
+creating the day-level dataset. commented out block creates a single-row participant level summary for all days with same participant.
+
+```{r}
+sb_bouts_day <- purrr::map_df(
+		split(epoch_file, epoch_file$Date),
+		~ PBpatterns::analyze_bouts(
+				.x$intensity, "SB", "SB_summary",
+				is_wear = .x$is_wear,
+				valid_indices = .x$valid_index,
+				epoch_length_sec = 60,
+		)
+)
+# sb_bouts_ppt <- purrr::map_df(
+# 		split(epoch_file, epoch_file$participant_id),
+# 		~ PBpatterns::analyze_bouts(
+# 				.x$intensity, "SB", "SB_summary",
+# 				is_wear = .x$is_wear,
+# 				valid_indices = .x$valid_index,
+# 				epoch_length_sec = 60
+# 		)
+# )
+```
+
+Need to calculate mean and median period of non-sed bouts. i think the way to do this would be to run the SB patterns variables on the non-SB categorical variables (may want to just create a binary categorical in the cell way up above--SB vs non-sb--and then the mean and median bout duration will be equal to the 'period' that jordan is asking for. then take the reciprocal of the mean period to get the active-to-sed probability jordan asked for.
+
+```{r}
+NONSB_day <- purrr::map_df(
+		split(epoch_file, epoch_file$Date),
+		~ PBpatterns::analyze_bouts(
+				.x$intensity, "non-sed", "SB_summary",
+				is_wear = .x$is_wear,
+				valid_indices = .x$valid_index,
+				epoch_length_sec = 60,
+		)
+)
+# NONSB_ppt <- purrr::map_df(
+# 		split(epoch_file, epoch_file$participant_id),
+# 		~ PBpatterns::analyze_bouts(
+# 				.x$intensity, "non-sed", "SB_summary",
+# 				is_wear = .x$is_wear,
+# 				valid_indices = .x$valid_index,
+# 				epoch_length_sec = 60
+# 		)
+# )
+```
+
+note that the variable names in these two new NONSB dataframes are WRONG. SB is hard-coded as the names but these frames are showing all non-sed behavior. going to pull out what i want and rename them to be clearer.
+```{r}
+day_subset$period_mean <- NONSB_day$mean_SB_bout_min
+day_subset$period_median <- NONSB_day$median_SB_bout_min
+day_subset$act_sed_prob <- 1/NONSB_day$period_mean
+
+
+# NONSB_ppt$period_mean <- NONSB_ppt$mean_SB_bout_min
+# NONSB_ppt$period_median <- NONSB_ppt$median_SB_bout_min
+# NONSB_ppt$act_sed_prob <- 1/NONSB_ppt$period_mean
+
+day_subset <- subset(NONSB_day, select = c("period_mean","period_median","act_sed_prob"))
+# ppt_subset <- subset(NONSB_ppt, select = c("period_mean","period_median","act_sed_prob"))
+
+```
+```{r}
+SB_day <- cbind(sb_bouts_day, day_subset)
+#SB_ppt <- cbind(sb_bouts_ppt, ppt_subset)
+```
+```{r}
+write.csv(SB_day, 'AG_day_sed_vars.csv')
+```
+Testing what we can do with PAL events files. the Lyden activpalProcessing package doesn't work on the new Extended Events file so i'm pulling the function from GitHub and seeing if i can adapt it. these next two functions are rewritten versions of the Lyden package that reads in the Extended Events file
+
+#Begin PAL analysis section.
+
+```{r}
+activpal.file.reader <-
+function(file.name.and.path)
+{
+  data <- read.csv(file.name.and.path, stringsAsFactors=FALSE)
+  data <- data[,(1:17)]
+  names(data) <- c("time","time_approx","datacount","event_type","duration","waking_day","cum_steps","methrs", 'abs_sum_diffX','abs_sum_diffY','abs_sum_diffZ','timeUpright','timeUpsidedown','TimeBackLying','TimeFrontLying','TimeLeftLying','TimeRightLying')
+	
+	data$time <- sub("#","",data$time)
+	data$time <- sub("#","",data$time)
+	data[,3] <- as.numeric(as.character(data[,3]))
+	data[,4] <- as.numeric(as.character(data[,4]))
+	#event type codes: 0=sed, 1=stand, 2=stepping, 2.1=cycling, 3.1=primary lying, 3.2=secondary lying, 4=nonwear, 5=seated transport
+	data[,5] <- as.numeric(as.character(data[,5]))
+	data[,6] <- as.numeric(as.character(data[,6]))
+	data[,7] <- as.numeric(as.character(data[,7]))
+	data[,8] <- as.numeric(as.character(data[,8]))
+	data[,9] <- as.numeric(as.character(data[,9]))
+	data[,10] <- as.numeric(as.character(data[,10]))
+	data[,11] <- as.numeric(as.character(data[,11]))
+	data[,12] <- as.numeric(as.character(data[,12]))
+	data[,13] <- as.numeric(as.character(data[,13]))
+	data[,14] <- as.numeric(as.character(data[,14]))
+	data[,15] <- as.numeric(as.character(data[,15]))
+	data[,16] <- as.numeric(as.character(data[,16]))
+	data[,17] <- as.numeric(as.character(data[,17]))
+	
+		t <- dim(data)[1]
+		
+		data <- data[!(data[,"time"] == "1899-12-30"),]
+		data <- data[!(data[,"time"] == "0"),]
+		n <- dim(data)[1]		
+
+		if(is.character(data$time)==TRUE&t==n)
+		{
+		data$time <- as.numeric(data$time)
+		data$time <- as.POSIXct(as.Date(data$time,origin="1899-12-30"))
+		data$time <- as.POSIXlt(data$time,tz="GMT")
+		data$time <- strptime(data$time,format="%Y-%m-%d %H:%M:%S")
+			}
+		
+	return(data)
+}
+```
+
+
+```{r}
+second.by.second <-
+function(data)
+{
+	sec.by.sec.data <- data.frame(time=NA, date=NA, ap.posture=NA, mets=NA, met.hours=NA, steps=NA)
+  sec.by.sec.data <- sec.by.sec.data[-1,]
+  
+		data$duration <- as.numeric(data$duration)
+				
+		data$methrs <- as.numeric(data$methrs)
+  
+  	n <- dim(data)[1]
+  	time.of.each.event <- as.vector(difftime(strptime(data$time[seq_len(n - 1) + 1],format="%Y-%m-%d %H:%M:%S"),strptime(data$time[seq_len(n - 1)],format="%Y-%m-%d %H:%M:%S"), units="secs"))
+	start.time <- strptime(data$time[1],format="%Y-%m-%d %H:%M:%S")
+
+  	time.of.each.event <- c(time.of.each.event, round(data[n,"duration"],0))
+	te <- length(time.of.each.event)
+	time.of.each.event[is.na(time.of.each.event)==T] <- 1
+	events <- rep((1:te),time.of.each.event)
+	
+	acts <- rep(data$event_type,time.of.each.event)
+	n <- length(acts)
+# The met hours per second in the interval.
+	met.hours <- data$methrs/data$duration 	
+	met.hours <- rep(met.hours,time.of.each.event)
+# To compute mets per second in the interval, multiply methours by 3600 sec/hour and divide by number of seconds.
+		mets <- data$methrs * 3600/data$duration
+		mets <- rep(mets,time.of.each.event)
+		steps <- rep(data$cum_steps,time.of.each.event)
+# Make 15-sec epoch variable and METs
+		times <- start.time+(0:(n-1))
+		fifteen.sec.times <- start.time + (15*rep(0:(floor(n/15)),each=15,length=n))
+		fifteen.sec.mets <- tapply(mets, fifteen.sec.times, mean)
+		fifteen.sec.mets <- rep(fifteen.sec.mets, each=15, length=n)
+
+# Make 1-min epoch variable and METs
+		times <- start.time+(0:(n-1))
+		one.min.times <- start.time + (60*rep(0:(floor(n/60)),each=60,length=n))
+		one.min.mets <- tapply(mets, one.min.times, mean)
+		one.min.mets <- rep(one.min.mets, each=60, length=n)
+		
+		date <- substring(format(times),1,10)
+
+sec.by.sec.data <- merge(sec.by.sec.data, data.frame(time=times, date=date, ap.posture=acts, mets=mets, fifteen.sec.mets=fifteen.sec.mets, one.min.mets=one.min.mets, met.hours=met.hours, steps=steps, num.events=events, stringsAsFactors=FALSE), all=TRUE)
+
+sec.by.sec.data$mets <- signif(sec.by.sec.data$mets,3)
+
+return(sec.by.sec.data)
+}
+```
+
+
+```{r}
+test_chels <- activpal.file.reader('PAL_events/S8085311-GHLA-PB08110163-EventsEx.csv')
+#test_oldpkg <- activpalProcessing::activpal.file.reader('S8085311-VANE-PB08110163-Events.csv')
+```
+```{r}
+second_pal_chels <- second.by.second(test_chels)
+#second_pal_oldpkg <- activpalProcessing::second.by.second(test_oldpkg)
+```
+
+so we have a usable second-level file now maybe. we can make a file that might work with paul's algorithm by 1) using the posture variable to make a wear/nonwear variable 2) making a variable that shows which postures are 'sedentary' postures. (per jordan, sed is 0, 3.2, and 5)
+
+```{r}
+pal_sed_file <- second_pal_chels
+pal_sed_file$is_wear <- !pal_sed_file$ap.posture == 4 
+
+pal_sed_file$posture_factor <- pal_sed_file %>% mutate(case_when(ap.posture==0 ~ 'SED', ap.posture==3.2 ~ 'SED', ap.posture == 5 ~ 'SED', TRUE ~ 'OTHER'))
+
+pal_sed_file$posture_factor <- factor(pal_sed_file$ap.posture)
+pal_sed_file$date <- as.Date(pal_sed_file$date,format="%Y-%m-%d")
+```
+same valid index function as paul's example but since this is a one-second file the threshold is 36000 (seconds in 10 hr) rather than 600 (minutes in 10 hr)
+```{r}
+pal_sed_file$valid_index <- sapply(
+  pal_sed_file$date,
+  function(i, vec) vec[match(i, names(vec))],
+  vec=tapply(pal_sed_file$is_wear, pal_sed_file$date, sum)) >= 36000
+```
+
+```{r}
+ftable(xtabs(~date+valid_index+is_wear, pal_sed_file))
+```
+
+```{r}
+sb_bouts_PAL_day <- purrr::map_df(
+  split(pal_sed_file, pal_sed_file$date),
+  ~PBpatterns::analyze_bouts(.x$posture_factor, 0,"SB_summary",
+                 is_wear=.x$is_wear,
+                 valid_indices=.x$valid_index,
+                 epoch_length_sec=1)
+)
+sb_bouts_PAL_ppt <- purrr::map_df(
+		~ PBpatterns::analyze_bouts(.x$posture_factor, 0, "SB_summary",
+				is_wear = .x$is_wear,
+				valid_indices = .x$valid_index,
+				epoch_length_sec = 1
+		)
+)
+```
+
+
+```{r}
+sed_bouts_PAL <- PBpatterns::analyze_bouts(
+  x=pal_sed_file$posture_factor, 
+  target=0, 'rle_standard', epoch_length_sec=1
+)
+```
+```{r}
+SB_patterns_PAL <- PBpatterns::analyze_bouts(
+  pal_sed_file$posture_factor, 0,'SB_summary',is_wear=pal_sed_file$is_wear,epoch_length_sec=1)
+```
+
+seems like we've gotten the pal data to work out pretty well which is exciting. time to try for CHAP
+
+```{r}
+chap_test <- read.csv('S8085311RAW_predicted.csv')
+```
+
+
+
