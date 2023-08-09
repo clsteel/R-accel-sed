@@ -212,17 +212,15 @@ second.by.second <-
 function(data)
 {
 	sec.by.sec.data <- data.frame(time=NA, date=NA, ap.posture=NA, mets=NA, met.hours=NA, steps=NA)
-  sec.by.sec.data <- sec.by.sec.data[-1,]
+	sec.by.sec.data <- sec.by.sec.data[-1,]
   
 		data$duration <- as.numeric(data$duration)
 				
 		data$methrs <- as.numeric(data$methrs)
-  
-  	n <- dim(data)[1]
-  	time.of.each.event <- as.vector(difftime(strptime(data$time[seq_len(n - 1) + 1],format="%Y-%m-%d %H:%M:%S"),strptime(data$time[seq_len(n - 1)],format="%Y-%m-%d %H:%M:%S"), units="secs"))
+	n <- dim(data)[1]
+	time.of.each.event <- as.vector(difftime(strptime(data$time[seq_len(n - 1) + 1],format="%Y-%m-%d %H:%M:%S"),strptime(data$time[seq_len(n - 1)],format="%Y-%m-%d %H:%M:%S"), units="secs"))
 	start.time <- strptime(data$time[1],format="%Y-%m-%d %H:%M:%S")
-
-  	time.of.each.event <- c(time.of.each.event, round(data[n,"duration"],0))
+	time.of.each.event <- c(time.of.each.event, round(data[n,"duration"],0))
 	te <- length(time.of.each.event)
 	time.of.each.event[is.na(time.of.each.event)==T] <- 1
 	events <- rep((1:te),time.of.each.event)
@@ -282,9 +280,9 @@ pal_sed_file$date <- as.Date(pal_sed_file$date,format="%Y-%m-%d")
 same valid index function as paul's example but since this is a one-second file the threshold is 36000 (seconds in 10 hr) rather than 600 (minutes in 10 hr)
 ```{r}
 pal_sed_file$valid_index <- sapply(
-  pal_sed_file$date,
-  function(i, vec) vec[match(i, names(vec))],
-  vec=tapply(pal_sed_file$is_wear, pal_sed_file$date, sum)) >= 36000
+		pal_sed_file$date,
+		function(i, vec) vec[match(i, names(vec))],
+		vec=tapply(pal_sed_file$is_wear, pal_sed_file$date, sum)) >= 36000
 ```
 
 ```{r}
@@ -293,8 +291,8 @@ ftable(xtabs(~date+valid_index+is_wear, pal_sed_file))
 
 ```{r}
 sb_bouts_PAL_day <- purrr::map_df(
-  split(pal_sed_file, pal_sed_file$date),
-  ~PBpatterns::analyze_bouts(.x$posture_factor, 0,"SB_summary",
+		split(pal_sed_file, pal_sed_file$date),
+		~PBpatterns::analyze_bouts(.x$posture_factor, 0,"SB_summary",
                  is_wear=.x$is_wear,
                  valid_indices=.x$valid_index,
                  epoch_length_sec=1)
@@ -311,20 +309,37 @@ sb_bouts_PAL_ppt <- purrr::map_df(
 
 ```{r}
 sed_bouts_PAL <- PBpatterns::analyze_bouts(
-  x=pal_sed_file$posture_factor, 
-  target=0, 'rle_standard', epoch_length_sec=1
+		x=pal_sed_file$posture_factor,
+		target=0, 'rle_standard', epoch_length_sec=1
 )
 ```
 ```{r}
 SB_patterns_PAL <- PBpatterns::analyze_bouts(
-  pal_sed_file$posture_factor, 0,'SB_summary',is_wear=pal_sed_file$is_wear,epoch_length_sec=1)
+		pal_sed_file$posture_factor, 0,'SB_summary',is_wear=pal_sed_file$is_wear,epoch_length_sec=1)
 ```
 
 seems like we've gotten the pal data to work out pretty well which is exciting. time to try for CHAP
 
 ```{r}
-chap_test <- read.csv('S8085311RAW_predicted.csv')
+chap_test <- read.csv('CHAP_predictions/S8085311RAW_predicted.csv')
 ```
+when i make this a script like the others i'll add a basename command for the participant id to pull in the filename
+so the chap file is at a 10s epoch and the main file is at a 60s epoch. going to do a many merge to get each 10s within a 60s to have the same information for date time
+```{r}
+epoch_file$time <- format(as.POSIXct(epoch_file$TimeStamp), format= "%H:%M")
+chap_test$time <- format(as.POSIXct(chap_test$timestamp), format= "%H:%M")
+chap_test$Date <- format(as.POSIXct(chap_test$timestamp), format="%Y/%m/%d")
+chap_test$Date <- as.Date(chap_test$Date,format="%Y/%m/%d")
 
 
-
+```
+merging information from the epoch file to the chap file
+```{r}
+chap_test <- chap_test %>% inner_join(epoch_file, by=c('Date'="Date", "time"='time'))
+```
+lapply(chap_files, function(x){
+chap_file <- read.csv(x, header=TRUE)
+chap_file$time <- format(as.POSIXct(chap_file$timestamp), format= "%H:%M")
+chap_file$Date <- format(as.POSIXct(chap_file$timestamp), format="%Y/%m/%d")
+chap_file$Date <- as.Date(chap_file$Date,format="%Y/%m/%d")
+})

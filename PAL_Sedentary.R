@@ -133,7 +133,7 @@ lapply(pal_files, function(x) {
   #in pal file nonwear is marked as 4, using that for nonwear
   pal_file$is_wear <- !pal_file$ap.posture == 4
   #making a variable that shows which postures are 'sedentary' postures. (per jordan, sed is 0, 3.2, and 5)
-  pal_file <- pal_file %>% mutate(posture_factor =case_when(pal_file$ap.posture==0 ~ 'SED', pal_file$ap.posture==3.2 ~ 'SED',
+  pal_file <- pal_file %>% mutate(posture_factor = case_when(pal_file$ap.posture==0 ~ 'SED', pal_file$ap.posture==3.2 ~ 'SED',
                                              pal_file$ap.posture == 5 ~ 'SED', TRUE ~ 'OTHER'))
   pal_file$posture_factor <- factor(pal_file$posture_factor)
   pal_file$date <- as.Date(pal_file$date,format="%Y-%m-%d")

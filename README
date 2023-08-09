@@ -1,0 +1,34 @@
+This project is meant to support accelerometer processing for SOL-VIDA sedentary behavior analysis. Raw ActiGraph,
+ActivPAL, and Actical data is read in and merged on participant and datetime. Choi nonwear is calculated for Actigraph and
+MVPA is calculated on the AG and AP data.
+
+Actigraph_Sedentary and PAL_Sedentary scripts compute sedentary pattern variables based on Paul Hibbing's PBpatterns
+R package.
+
+CHAP 10s posture data is merged with the ActiGraph data and sed pattern variables are run on that as well. all sed
+pattern variables are merged together into a day-level file along with the MVPA and weartime information.
+
+TODO:
+-script merging of preprocessed epoch data with CHAP output
+-script for CHAP sed patterns
+-script to merge all sed output into one daily sed file with other daily variables
+
+**check that participant IDs are present in all files (including preprocessed epoch level files)
+
+**check that files will merge correctly based on participant ids present in filename
+
+Proposed data pipeline:
+directories of device files:
+pal (epoch level)
+pal (extended events)
+actigraph
+actical
+CHAP output (from Python script run separately)
+
+**all files need to be named consistently with unique HCHS ID in the filename
+one script merges pal epoch/actigraph/actical files -> creates epoch-level dataset
+one script calculates sed pattern vars on the epoch dataset output from step 1 -> creates day-level sed pattern dataset
+one script calculates sed pattern vars on the pal events file -> creates day-level sed pattern dataset
+one script merges actigraph 60s epoch file with CHAP 10s output -> creates day-level sed pattern dataset
+finally merge all sed pattern vars into one file and combine with the day-level aggregated version of the epoch file
+    that was output from the first script. -> creates day-level MVPA and summary dataset INCLUDING all sed pattern vars
