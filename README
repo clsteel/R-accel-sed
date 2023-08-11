@@ -10,10 +10,7 @@ pattern variables are merged together into a day-level file along with the MVPA 
 
 TODO:
 -script merging of preprocessed epoch data with CHAP output
--script for CHAP sed patterns
 -script to merge all sed output into one daily sed file with other daily variables
-
-**check that participant IDs are present in all files (including preprocessed epoch level files)
 
 **check that files will merge correctly based on participant ids present in filename
 
