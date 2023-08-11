@@ -130,6 +130,9 @@ pal_files <- list.files("PAL_events", pattern="*.csv", full.names=TRUE, recursiv
 lapply(pal_files, function(x) {
   pal_file_full <- activpal.file.reader(x)
   pal_file <- second.by.second(pal_file_full)
+  string <- basename(x)
+  string <- substr(string, 1, nchar(string)-4)
+  pal_file$filename <- string
   #in pal file nonwear is marked as 4, using that for nonwear
   pal_file$is_wear <- !pal_file$ap.posture == 4
   #making a variable that shows which postures are 'sedentary' postures. (per jordan, sed is 0, 3.2, and 5)
@@ -167,17 +170,17 @@ lapply(pal_files, function(x) {
   #concatenate the new columns to the other ones. this is not a merge on date so it could introduce unforseen errors down the line.
   SB_day <- cbind(sb_PAL_day, day_subset)
   #add participant id variable
-  SB_day$ppt_id <- basename(x)
+  SB_day$ppt_id <- string
   #aggregate by day and bind to results since paul's code doesn't retain the date in the daily sed pattern file.
   date_agg <- aggregate(pal_file, by=list(pal_file$date), FUN='first')
   SB_day <- cbind(SB_day, date_agg$date)
 
-  write_csv(SB_day, file=paste0('test_output/sed_patterns/',basename(x),'_sed_patternsAP.csv'))
+  write_csv(SB_day, file=paste0('test_output/sed_patterns/',string,'_sed_patternsAP.csv'))
   #running the code to create the sed bout overall file
   sed_bouts_PAL <- PBpatterns::analyze_bouts(
     x=pal_file$posture_factor,
     target="SED", 'rle_standard', epoch_length_sec=1
   )
   sed_bouts_PAL$ppt_id <- basename(x)
-  write_csv(sed_bouts_PAL, file=paste0("test_output/bouts/",basename(x),"_boutsAP.csv"))
+  write_csv(sed_bouts_PAL, file=paste0("test_output/bouts/",string,"_boutsAP.csv"))
 })

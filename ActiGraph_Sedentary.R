@@ -40,7 +40,9 @@ epoch_files <- list.files("Epoch_Preprocessed", pattern="*.csv", full.names=TRUE
 lapply(epoch_files, function(x) {
   epoch_file <- read.csv(x, header=TRUE)
   #create a variable containing the participant identifer pulled from the filename
-  epoch_file$filename <- x
+  string <- basename(x)
+  string <- substr(string, 1, nchar(string)-4)
+  epoch_file$filename <- string
   #pull date from timestamp
   epoch_file$Date <- as.Date(epoch_file$TimeStamp,format="%m/%d/%Y")
   #format timestamp as datetime
@@ -62,14 +64,14 @@ lapply(epoch_files, function(x) {
     labels=c("SB","non-sed"),
     right=FALSE)
   #write an output file ready to have sed pattern vars calculated on it.
-  write_csv(epoch_file, file=paste0("test_output/epoch/",basename(x),"_modified.csv"))
+  write_csv(epoch_file, file=paste0("test_output/epoch/",string,"_modified.csv"))
   #create and save dataset of all sedentary bouts with filename saved as participant identifier
   sed_bouts <- PBpatterns::analyze_bouts(
     x=epoch_file$intensity_AG,
     target='SB', 'rle_standard', epoch_length_sec=60, is_wear=epoch_file$is_wear_AG, valid_indices=epoch_file$valid_index_AG
   )
-  sed_bouts$ppt_id <- basename(x)
-  write_csv(sed_bouts, file=paste0("test_output/bouts/",basename(x),"_boutsAG.csv"))
+  sed_bouts$ppt_id <- string
+  write_csv(sed_bouts, file=paste0("test_output/bouts/",string,"_boutsAG.csv"))
   #create csv of all days with sed bout variables calculated
   sb_bouts_day <- purrr::map_df(
     split(epoch_file, epoch_file$Date),
@@ -98,9 +100,9 @@ lapply(epoch_files, function(x) {
   #concatenate the new columns to the other ones. this is not a merge on date so it could introduce unforseen errors down the line.
   SB_day <- cbind(sb_bouts_day, day_subset)
   #add participant id variable
-  SB_day$ppt_id <- basename(x)
+  SB_day$ppt_id <- string
   #aggregate by day and bind to results since paul's code doesn't retain the date in the daily sed pattern file.
   date_agg <- aggregate(epoch_file, by=list(epoch_file$Date), FUN='first')
   SB_day <- cbind(SB_day, date_agg$Date)
-  write_csv(SB_day, file=paste0('test_output/sed_patterns/',basename(x),'_sed_patternsAG.csv'))
+  write_csv(SB_day, file=paste0('test_output/sed_patterns/',string,'_sed_patternsAG.csv'))
 })
